@@ -1,0 +1,26 @@
+# PlatformIO
+.pio/
+.vscode/
+lib/
+include/
+
+# Arduino IDE
+build/
+*.elf
+*.bin
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Node (simulator)
+node_modules/
+
+# IDE
+.idea/
+*.code-workspace
+
+# Secrets (don't commit your actual credentials)
+# config.h with real passwords should not be committed
+# Use config.h.example instead

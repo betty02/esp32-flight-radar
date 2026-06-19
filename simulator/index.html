@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Flight Radar - Browser Simulator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        h1 { color: #00ff88; margin-bottom: 5px; font-size: 1.4em; }
+        .subtitle { color: #666; margin-bottom: 20px; font-size: 0.85em; }
+        .container {
+            display: flex; gap: 30px; align-items: flex-start;
+            flex-wrap: wrap; justify-content: center;
+        }
+        .display-wrapper { position: relative; }
+        .display-frame {
+            width: 300px; height: 300px; border-radius: 50%;
+            background: #000; padding: 10px;
+            box-shadow: 0 0 20px rgba(0,255,136,0.1), inset 0 0 30px rgba(0,0,0,0.5);
+            border: 3px solid #333;
+        }
+        canvas { border-radius: 50%; display: block; cursor: crosshair; }
+        .controls {
+            background: #16213e; border: 1px solid #333;
+            border-radius: 8px; padding: 20px; width: 320px;
+        }
+        .controls h3 { color: #00ff88; margin-bottom: 15px; font-size: 1em; }
+        .control-group { margin-bottom: 15px; }
+        .control-group label { display: block; color: #888; font-size: 0.8em; margin-bottom: 4px; }
+        .control-group input, .control-group select {
+            width: 100%; padding: 8px; background: #0f1629;
+            border: 1px solid #333; color: #e0e0e0; border-radius: 4px;
+            font-family: 'Courier New', monospace; font-size: 0.9em;
+        }
+        .control-group input:focus, .control-group select:focus { outline: none; border-color: #00ff88; }
+        .control-row { display: flex; gap: 10px; }
+        .control-row .control-group { flex: 1; }
+        button {
+            width: 100%; padding: 10px; background: #00ff88; color: #1a1a2e;
+            border: none; border-radius: 4px; font-family: 'Courier New', monospace;
+            font-weight: bold; cursor: pointer; font-size: 0.9em; margin-top: 10px;
+        }
+        button:hover { background: #00cc6a; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        button.stop { background: #ff4444; color: white; }
+        button.stop:hover { background: #cc3333; }
+        .status-bar {
+            margin-top: 15px; padding: 10px; background: #0f1629;
+            border-radius: 4px; font-size: 0.75em; border: 1px solid #333;
+        }
+        .status-bar .status-line { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .status-bar .status-line:last-child { margin-bottom: 0; }
+        .status-value { color: #00ff88; }
+        .status-value.error { color: #ff4444; }
+        .status-value.warning { color: #ffaa00; }
+        .aircraft-list {
+            margin-top: 15px; max-height: 200px; overflow-y: auto;
+            font-size: 0.7em; background: #0f1629;
+            border: 1px solid #333; border-radius: 4px; padding: 8px;
+        }
+        .aircraft-list-item {
+            display: flex; justify-content: space-between;
+            padding: 3px 0; border-bottom: 1px solid #1a1a2e; cursor: pointer;
+        }
+        .aircraft-list-item:hover { background: #1a2a4e; }
+        .aircraft-list-item:last-child { border-bottom: none; }
+        .callsign-col { color: #00ffff; width: 70px; }
+        .alt-col { width: 60px; text-align: right; }
+        .heading-col { width: 45px; text-align: right; color: #888; }
+        .legend { margin-top: 15px; font-size: 0.7em; color: #888; }
+        .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+        .legend-color { width: 12px; height: 12px; border-radius: 2px; }
+        .note {
+            margin-top: 20px; padding: 12px; background: #1a1a0e;
+            border: 1px solid #444400; border-radius: 4px;
+            font-size: 0.75em; color: #aaaa66; max-width: 650px; text-align: center;
+        }
+        /* Aircraft detail popup */
+        .popup-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7); z-index: 1000;
+            justify-content: center; align-items: center;
+        }
+        .popup-overlay.active { display: flex; }
+        .popup {
+            background: #1e1e2e; border: 1px solid #444; border-radius: 12px;
+            width: 320px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.8);
+        }
+        .popup-header {
+            background: #2a2a3e; padding: 12px 16px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .popup-header .callsign { color: #ffcc00; font-size: 1.2em; font-weight: bold; }
+        .popup-header .meta { color: #888; font-size: 0.75em; }
+        .popup-header .close-btn {
+            background: none; border: none; color: #888; font-size: 1.4em;
+            cursor: pointer; width: auto; margin: 0; padding: 4px 8px;
+        }
+        .popup-header .close-btn:hover { color: #fff; }
+        .popup-route {
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px; gap: 15px; background: #16162a;
+        }
+        .popup-airport { text-align: center; }
+        .popup-airport .iata { font-size: 1.8em; font-weight: bold; color: #fff; }
+        .popup-airport .city { font-size: 0.7em; color: #888; margin-top: 2px; }
+        .popup-route-arrow { color: #ffcc00; font-size: 1.5em; }
+        .popup-details {
+            padding: 16px; display: grid;
+            grid-template-columns: 1fr 1fr; gap: 12px;
+        }
+        .popup-detail { text-align: center; }
+        .popup-detail .detail-label { font-size: 0.65em; color: #666; text-transform: uppercase; }
+        .popup-detail .detail-value { font-size: 1em; color: #e0e0e0; margin-top: 2px; }
+        .popup-progress {
+            padding: 0 16px 16px; text-align: center;
+        }
+        .progress-bar {
+            height: 4px; background: #333; border-radius: 2px; margin-top: 8px; overflow: hidden;
+        }
+        .progress-fill { height: 100%; background: #ffcc00; border-radius: 2px; transition: width 0.3s; }
+        .popup-loading { padding: 20px; text-align: center; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>&#9992; ESP32 Flight Radar - Simulator</h1>
+    <p class="subtitle">Browser preview — click any aircraft for flight details</p>
+
+    <div class="container">
+        <div class="display-wrapper">
+            <div class="display-frame">
+                <canvas id="radar" width="280" height="280"></canvas>
+            </div>
+        </div>
+
+        <div class="controls">
+            <h3>&#9881; Configuration</h3>
+
+            <div class="control-group">
+                <label>UK Postcode</label>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="postcode" placeholder="e.g. SW1A 1AA" style="flex: 1; text-transform: uppercase;">
+                    <button onclick="lookupPostcode()" style="width: auto; margin-top: 0; padding: 8px 12px; font-size: 0.8em;">Lookup</button>
+                </div>
+                <span id="postcodeResult" style="font-size: 0.7em; color: #666; margin-top: 4px; display: block;"></span>
+            </div>
+
+            <div class="control-row">
+                <div class="control-group">
+                    <label>Latitude</label>
+                    <input type="number" id="lat" value="51.4700" step="0.0001">
+                </div>
+                <div class="control-group">
+                    <label>Longitude</label>
+                    <input type="number" id="lon" value="-0.4543" step="0.0001">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Radius (nautical miles)</label>
+                <input type="number" id="radius" value="25" min="5" max="100" step="5">
+            </div>
+
+            <div class="control-group">
+                <label>Refresh interval (seconds)</label>
+                <input type="number" id="interval" value="15" min="10" max="60" step="5">
+            </div>
+
+            <div class="control-group">
+                <label>Preset Locations</label>
+                <select id="presets" onchange="applyPreset()">
+                    <option value="">-- Select --</option>
+                    <option value="51.4700,-0.4543,25">London Heathrow</option>
+                    <option value="51.1537,-0.1821,20">Gatwick</option>
+                    <option value="53.3537,-2.2750,20">Manchester</option>
+                    <option value="40.6413,-73.7781,30">New York JFK</option>
+                    <option value="33.9425,-118.4081,25">Los Angeles LAX</option>
+                    <option value="48.3538,11.7861,30">Munich</option>
+                    <option value="25.2532,55.3657,25">Dubai</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label><input type="checkbox" id="showMap" checked style="width:auto; margin-right: 6px;">Show map background</label>
+            </div>
+
+            <button id="startBtn" onclick="startTracking()">&#9654; Start Tracking</button>
+            <button id="stopBtn" class="stop" onclick="stopTracking()" style="display:none">&#9632; Stop</button>
+
+            <div class="status-bar">
+                <div class="status-line"><span>Status:</span><span class="status-value" id="status">Idle</span></div>
+                <div class="status-line"><span>Aircraft:</span><span class="status-value" id="countDisplay">0</span></div>
+                <div class="status-line"><span>Last update:</span><span class="status-value" id="lastUpdate">--</span></div>
+                <div class="status-line"><span>API calls:</span><span class="status-value" id="apiCalls">0</span></div>
+            </div>
+
+            <div class="aircraft-list" id="aircraftList">
+                <em style="color: #666;">No aircraft tracked yet</em>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="legend-color" style="background: #ff8800"></div> Below 5,000 ft</div>
+                <div class="legend-item"><div class="legend-color" style="background: #ffff00"></div> 5,000 - 15,000 ft</div>
+                <div class="legend-item"><div class="legend-color" style="background: #00ff00"></div> 15,000 - 30,000 ft</div>
+                <div class="legend-item"><div class="legend-color" style="background: #00ffff"></div> 30,000 - 40,000 ft</div>
+                <div class="legend-item"><div class="legend-color" style="background: #ff00ff"></div> Above 40,000 ft</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Aircraft Detail Popup -->
+    <div class="popup-overlay" id="popupOverlay" onclick="closePopup(event)">
+        <div class="popup" onclick="event.stopPropagation()">
+            <div class="popup-header">
+                <div>
+                    <div class="callsign" id="popupCallsign">---</div>
+                    <div class="meta" id="popupMeta">---</div>
+                </div>
+                <button class="close-btn" onclick="closePopup()">&#10005;</button>
+            </div>
+            <div id="popupPhoto" style="width:100%; height:140px; background:#111; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                <span style="color:#444; font-size:0.8em;" id="popupPhotoText">Loading photo...</span>
+                <img id="popupPhotoImg" style="width:100%; height:100%; object-fit:cover; display:none;" alt="Aircraft photo">
+            </div>
+            <div id="popupAircraftInfo" style="padding: 8px 16px; background:#1a1a2e; display:flex; justify-content:space-between; font-size:0.75em; border-bottom: 1px solid #333;">
+                <span id="popupType" style="color:#aaa;">---</span>
+                <span id="popupReg" style="color:#ffcc00;">---</span>
+                <span id="popupOperator" style="color:#aaa;">---</span>
+            </div>
+            <div class="popup-route" id="popupRoute">
+                <div class="popup-airport">
+                    <div class="iata" id="popupOrigin">---</div>
+                    <div class="city" id="popupOriginCity">Origin</div>
+                </div>
+                <div class="popup-route-arrow">&#9992;</div>
+                <div class="popup-airport">
+                    <div class="iata" id="popupDest">---</div>
+                    <div class="city" id="popupDestCity">Destination</div>
+                </div>
+            </div>
+            <div class="popup-details">
+                <div class="popup-detail">
+                    <div class="detail-label">Altitude</div>
+                    <div class="detail-value" id="popupAlt">---</div>
+                </div>
+                <div class="popup-detail">
+                    <div class="detail-label">Speed</div>
+                    <div class="detail-value" id="popupSpeed">---</div>
+                </div>
+                <div class="popup-detail">
+                    <div class="detail-label">Heading</div>
+                    <div class="detail-value" id="popupHeading">---</div>
+                </div>
+                <div class="popup-detail">
+                    <div class="detail-label">Vert. Rate</div>
+                    <div class="detail-value" id="popupVRate">---</div>
+                </div>
+            </div>
+            <div class="popup-loading" id="popupLoading">Loading flight info...</div>
+        </div>
+    </div>
+
+    <p class="note">
+        &#9888; Click any aircraft on the radar or in the list to see flight details.
+        Map tiles from OpenStreetMap. Flight data from OpenSky Network.
+    </p>
+
+    <script>
+        // ============================================
+        // State
+        // ============================================
+        const canvas = document.getElementById('radar');
+        const ctx = canvas.getContext('2d');
+        const SIZE = 280;
+        const CENTER = SIZE / 2;
+        const RADIUS = CENTER - 4;
+
+        let aircraft = [];
+        let tracking = false;
+        let pollTimer = null;
+        let renderTimer = null;
+        let apiCallCount = 0;
+        let mapImage = null;
+        let mapLoaded = false;
+        let selectedAircraft = null;
+
+        // ============================================
+        // Config
+        // ============================================
+        function getConfig() {
+            return {
+                lat: parseFloat(document.getElementById('lat').value),
+                lon: parseFloat(document.getElementById('lon').value),
+                radius: parseFloat(document.getElementById('radius').value),
+                interval: parseInt(document.getElementById('interval').value) * 1000
+            };
+        }
+
+        function applyPreset() {
+            const val = document.getElementById('presets').value;
+            if (!val) return;
+            const [lat, lon, radius] = val.split(',');
+            document.getElementById('lat').value = lat;
+            document.getElementById('lon').value = lon;
+            document.getElementById('radius').value = radius;
+            loadMapTiles();
+        }
+
+        // ============================================
+        // UK Postcode Lookup
+        // ============================================
+        async function lookupPostcode() {
+            const input = document.getElementById('postcode');
+            const result = document.getElementById('postcodeResult');
+            const postcode = input.value.trim();
+            if (!postcode) { result.textContent = 'Enter a postcode'; result.style.color = '#ff4444'; return; }
+            result.textContent = 'Looking up...'; result.style.color = '#ffaa00';
+            try {
+                const response = await fetch(`/api/postcode/${encodeURIComponent(postcode)}`);
+                const data = await response.json();
+                if (data.status === 200 && data.result) {
+                    const { latitude, longitude, admin_district, parish } = data.result;
+                    document.getElementById('lat').value = latitude.toFixed(4);
+                    document.getElementById('lon').value = longitude.toFixed(4);
+                    result.textContent = `\u2713 ${data.result.postcode} \u2014 ${parish || admin_district || ''}`;
+                    result.style.color = '#00ff88';
+                    loadMapTiles();
+                } else {
+                    result.textContent = '\u2717 Postcode not found'; result.style.color = '#ff4444';
+                }
+            } catch (err) {
+                result.textContent = `\u2717 Error: ${err.message}`; result.style.color = '#ff4444';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('postcode').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); lookupPostcode(); }
+            });
+            loadMapTiles();
+        });
+
+        // ============================================
+        // Map Tile Loading (OpenStreetMap)
+        // ============================================
+        function latLonToTile(lat, lon, zoom) {
+            const n = Math.pow(2, zoom);
+            const x = Math.floor((lon + 180) / 360 * n);
+            const latRad = lat * Math.PI / 180;
+            const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+            return { x, y, z: zoom };
+        }
+
+        function tileToLatLon(x, y, zoom) {
+            const n = Math.pow(2, zoom);
+            const lon = x / n * 360 - 180;
+            const latRad = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+            const lat = latRad * 180 / Math.PI;
+            return { lat, lon };
+        }
+
+        function loadMapTiles() {
+            const config = getConfig();
+            // Choose zoom level based on radius
+            let zoom = 10;
+            if (config.radius <= 10) zoom = 12;
+            else if (config.radius <= 20) zoom = 11;
+            else if (config.radius <= 40) zoom = 10;
+            else if (config.radius <= 80) zoom = 9;
+            else zoom = 8;
+
+            const centerTile = latLonToTile(config.lat, config.lon, zoom);
+
+            // We need a 3x3 grid of tiles to cover the area, then crop to circle
+            const tileSize = 256;
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = tileSize * 3;
+            offscreenCanvas.height = tileSize * 3;
+            const offCtx = offscreenCanvas.getContext('2d');
+
+            let loaded = 0;
+            const total = 9;
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const tx = centerTile.x + dx;
+                    const ty = centerTile.y + dy;
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        offCtx.drawImage(img, (dx + 1) * tileSize, (dy + 1) * tileSize);
+                        loaded++;
+                        if (loaded === total) {
+                            // Calculate pixel position of center lat/lon within the 3x3 tile grid
+                            const n = Math.pow(2, zoom);
+                            const centerPixelX = ((config.lon + 180) / 360 * n - (centerTile.x - 1)) * tileSize;
+                            const latRad = config.lat * Math.PI / 180;
+                            const centerPixelY = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n - (centerTile.y - 1)) * tileSize;
+
+                            // Crop to our display size centered on the location
+                            const cropCanvas = document.createElement('canvas');
+                            cropCanvas.width = SIZE;
+                            cropCanvas.height = SIZE;
+                            const cropCtx = cropCanvas.getContext('2d');
+                            cropCtx.drawImage(offscreenCanvas,
+                                centerPixelX - SIZE/2, centerPixelY - SIZE/2, SIZE, SIZE,
+                                0, 0, SIZE, SIZE);
+
+                            mapImage = cropCanvas;
+                            mapLoaded = true;
+                            render();
+                        }
+                    };
+                    img.onerror = () => { loaded++; };
+                    img.src = `/api/tile/${zoom}/${tx}/${ty}.png`;
+                }
+            }
+        }
+
+        // ============================================
+        // Tracking Control
+        // ============================================
+        function startTracking() {
+            tracking = true;
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'block';
+            document.getElementById('status').textContent = 'Connecting...';
+            document.getElementById('status').className = 'status-value warning';
+            loadMapTiles();
+            fetchData();
+            const config = getConfig();
+            pollTimer = setInterval(fetchData, config.interval);
+            renderTimer = setInterval(render, 1000);
+        }
+
+        function stopTracking() {
+            tracking = false;
+            clearInterval(pollTimer);
+            clearInterval(renderTimer);
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('stopBtn').style.display = 'none';
+            document.getElementById('status').textContent = 'Stopped';
+            document.getElementById('status').className = 'status-value';
+        }
+
+        // ============================================
+        // API Fetch
+        // ============================================
+        async function fetchData() {
+            if (!tracking) return;
+            const config = getConfig();
+            const radiusKm = config.radius * 1.852;
+            const latDelta = radiusKm / 111.12;
+            const lonDelta = radiusKm / (111.12 * Math.cos(config.lat * Math.PI / 180));
+            const lamin = (config.lat - latDelta).toFixed(4);
+            const lamax = (config.lat + latDelta).toFixed(4);
+            const lomin = (config.lon - lonDelta).toFixed(4);
+            const lomax = (config.lon + lonDelta).toFixed(4);
+
+            const url = `/api/opensky?lamin=${lamin}&lomin=${lomin}&lamax=${lamax}&lomax=${lomax}`;
+
+            try {
+                const response = await fetch(url);
+                apiCallCount++;
+                document.getElementById('apiCalls').textContent = apiCallCount;
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                parseAircraft(data, config);
+                document.getElementById('status').textContent = 'Live';
+                document.getElementById('status').className = 'status-value';
+                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+            } catch (err) {
+                console.error('Fetch error:', err);
+                document.getElementById('status').textContent = err.message;
+                document.getElementById('status').className = 'status-value error';
+            }
+        }
+
+        function parseAircraft(data, config) {
+            if (!data.states) { aircraft = []; document.getElementById('countDisplay').textContent = '0'; return; }
+            aircraft = data.states
+                .filter(s => {
+                    if (s[5] === null || s[6] === null) return false;
+                    if (s[8]) return false;
+                    if (s[7] !== null && s[7] < 152) return false;
+                    return true;
+                })
+                .slice(0, 20)
+                .map(s => ({
+                    icao24: s[0] || '???',
+                    callsign: (s[1] || s[0] || '???').trim(),
+                    country: s[2] || '',
+                    lon: s[5],
+                    lat: s[6],
+                    altitude: s[7] || 0,
+                    velocity: s[9] || 0,
+                    heading: s[10] || 0,
+                    verticalRate: s[11] || 0,
+                    lastUpdate: Date.now()
+                }));
+            document.getElementById('countDisplay').textContent = aircraft.length;
+            updateAircraftList();
+        }
+
+        function updateAircraftList() {
+            const list = document.getElementById('aircraftList');
+            if (aircraft.length === 0) { list.innerHTML = '<em style="color:#666;">No aircraft in range</em>'; return; }
+            list.innerHTML = aircraft.map((a, i) => {
+                const altFt = Math.round(a.altitude * 3.28084);
+                const fl = Math.round(altFt / 100);
+                const color = getAltitudeColorCSS(a.altitude);
+                return `<div class="aircraft-list-item" onclick="showAircraftPopup(${i})">
+                    <span class="callsign-col">${a.callsign}</span>
+                    <span class="alt-col" style="color:${color}">FL${fl}</span>
+                    <span class="heading-col">${Math.round(a.heading)}\u00B0</span>
+                </div>`;
+            }).join('');
+        }
+
+        // ============================================
+        // Click/Touch to Select Aircraft
+        // ============================================
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = SIZE / rect.width;
+            const scaleY = SIZE / rect.height;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+
+            // Find closest aircraft to click
+            let closest = null;
+            let closestDist = 20; // Max pixel distance to select
+
+            for (let i = 0; i < aircraft.length; i++) {
+                const pos = getAircraftScreenPos(aircraft[i]);
+                if (!pos) continue;
+                const dx = pos.x - clickX;
+                const dy = pos.y - clickY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closest = i;
+                }
+            }
+
+            if (closest !== null) {
+                showAircraftPopup(closest);
+            }
+        });
+
+        function getAircraftScreenPos(a) {
+            const now = Date.now();
+            const elapsed = (now - a.lastUpdate) / 1000;
+            let lat = a.lat;
+            let lon = a.lon;
+            if (elapsed > 0 && a.velocity > 0) {
+                const distKm = (a.velocity * elapsed) / 1000;
+                const headRad = a.heading * Math.PI / 180;
+                lat += (distKm * Math.cos(headRad)) / 111.12;
+                lon += (distKm * Math.sin(headRad)) / (111.12 * Math.cos(lat * Math.PI / 180));
+            }
+            const pos = geoToScreen(lat, lon);
+            const dx = pos.x - CENTER;
+            const dy = pos.y - CENTER;
+            if (Math.sqrt(dx * dx + dy * dy) > RADIUS - 5) return null;
+            return pos;
+        }
+
+        // ============================================
+        // Aircraft Detail Popup
+        // ============================================
+        async function showAircraftPopup(index) {
+            const a = aircraft[index];
+            if (!a) return;
+            selectedAircraft = a;
+
+            const altFt = Math.round(a.altitude * 3.28084);
+            const speedKts = Math.round(a.velocity * 1.944);
+            const speedKmh = Math.round(a.velocity * 3.6);
+            const vRateFpm = Math.round((a.verticalRate || 0) * 196.85);
+
+            // Set basic info immediately
+            document.getElementById('popupCallsign').textContent = a.callsign;
+            document.getElementById('popupMeta').textContent = `ICAO: ${a.icao24.toUpperCase()} | ${a.country}`;
+            document.getElementById('popupAlt').textContent = `FL${Math.round(altFt/100)} (${altFt.toLocaleString()} ft)`;
+            document.getElementById('popupSpeed').textContent = `${speedKts} kts / ${speedKmh} km/h`;
+            document.getElementById('popupHeading').textContent = `${Math.round(a.heading)}\u00B0 ${getCompassDir(a.heading)}`;
+            document.getElementById('popupVRate').textContent = vRateFpm === 0 ? 'Level' : `${vRateFpm > 0 ? '+' : ''}${vRateFpm} ft/min`;
+
+            // Reset fields that need loading
+            document.getElementById('popupOrigin').textContent = '---';
+            document.getElementById('popupOriginCity').textContent = 'Origin';
+            document.getElementById('popupDest').textContent = '---';
+            document.getElementById('popupDestCity').textContent = 'Destination';
+            document.getElementById('popupType').textContent = '---';
+            document.getElementById('popupReg').textContent = '---';
+            document.getElementById('popupOperator').textContent = '---';
+            document.getElementById('popupPhotoImg').style.display = 'none';
+            document.getElementById('popupPhotoText').style.display = 'block';
+            document.getElementById('popupPhotoText').textContent = 'Loading photo...';
+            document.getElementById('popupLoading').style.display = 'block';
+
+            // Show popup
+            document.getElementById('popupOverlay').classList.add('active');
+
+            // Fetch all data in parallel
+            const [routeResult, aircraftResult, photoResult] = await Promise.allSettled([
+                fetchRoute(a.callsign),
+                fetchAircraftMeta(a.icao24),
+                fetchAircraftPhoto(a.icao24)
+            ]);
+
+            // Apply route info
+            if (routeResult.status === 'fulfilled' && routeResult.value) {
+                const r = routeResult.value;
+                document.getElementById('popupOrigin').textContent = r.origin || '?';
+                document.getElementById('popupDest').textContent = r.destination || '?';
+                document.getElementById('popupOriginCity').textContent = r.originCity || r.originName || 'Departure';
+                document.getElementById('popupDestCity').textContent = r.destinationCity || r.destinationName || 'Arrival';
+                // Update header with airline info if available
+                if (r.airline) {
+                    const currentMeta = document.getElementById('popupMeta').textContent;
+                    document.getElementById('popupMeta').textContent = `${r.airline} | ${currentMeta}`;
+                }
+                if (r.callsignIata) {
+                    document.getElementById('popupCallsign').textContent = `${a.callsign} (${r.callsignIata})`;
+                }
+            } else {
+                document.getElementById('popupOriginCity').textContent = 'Route unavailable';
+                document.getElementById('popupDestCity').textContent = '';
+            }
+
+            // Apply aircraft metadata
+            if (aircraftResult.status === 'fulfilled' && aircraftResult.value) {
+                const m = aircraftResult.value;
+                document.getElementById('popupType').textContent = m.type || m.typeCode || '---';
+                document.getElementById('popupReg').textContent = m.registration || '---';
+                document.getElementById('popupOperator').textContent = m.operator || '---';
+                // Update header meta with more info
+                document.getElementById('popupMeta').textContent = 
+                    `${m.registration || a.icao24.toUpperCase()} | ${m.typeCode || ''} | ${a.country}`;
+            }
+
+            // Apply photo
+            if (photoResult.status === 'fulfilled' && photoResult.value) {
+                const img = document.getElementById('popupPhotoImg');
+                img.src = photoResult.value;
+                img.style.display = 'block';
+                document.getElementById('popupPhotoText').style.display = 'none';
+            } else {
+                document.getElementById('popupPhotoText').textContent = 'No photo available';
+            }
+
+            document.getElementById('popupLoading').style.display = 'none';
+        }
+
+        async function fetchRoute(callsign) {
+            try {
+                const response = await fetch(`/api/route/${encodeURIComponent(callsign)}`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                const route = data?.response?.flightroute;
+                if (route && route.origin && route.destination) {
+                    return {
+                        origin: route.origin.iata_code || route.origin.icao_code,
+                        originName: route.origin.name || '',
+                        originCity: route.origin.municipality || '',
+                        destination: route.destination.iata_code || route.destination.icao_code,
+                        destinationName: route.destination.name || '',
+                        destinationCity: route.destination.municipality || '',
+                        airline: route.airline?.name || '',
+                        airlineIata: route.airline?.iata || '',
+                        callsignIata: route.callsign_iata || ''
+                    };
+                }
+            } catch (e) {}
+            return null;
+        }
+
+        async function fetchAircraftMeta(icao24) {
+            try {
+                const response = await fetch(`/api/aircraft/${icao24}`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                return {
+                    typeCode: data.ICAOTypeCode || '',
+                    type: data.Type || '',
+                    manufacturer: data.Manufacturer || '',
+                    registration: data.Registration || '',
+                    operator: data.RegisteredOwners || ''
+                };
+            } catch (e) {}
+            return null;
+        }
+
+        async function fetchAircraftPhoto(icao24) {
+            try {
+                const response = await fetch(`/api/photo/${icao24}`);
+                if (!response.ok) return null;
+                const data = await response.json();
+                if (data.photos && data.photos.length > 0) {
+                    // Get the thumbnail URL
+                    const photo = data.photos[0];
+                    return photo.thumbnail_large?.src || photo.thumbnail?.src || null;
+                }
+            } catch (e) {}
+            return null;
+        }
+
+        function closePopup(e) {
+            if (e && e.target !== document.getElementById('popupOverlay')) return;
+            document.getElementById('popupOverlay').classList.remove('active');
+            selectedAircraft = null;
+        }
+
+        function getCompassDir(deg) {
+            const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+            return dirs[Math.round(deg / 22.5) % 16];
+        }
+
+        // ============================================
+        // Coordinate Conversion
+        // ============================================
+        function geoToScreen(lat, lon) {
+            const config = getConfig();
+            const dLatKm = (lat - config.lat) * 111.12;
+            const dLonKm = (lon - config.lon) * 111.12 * Math.cos(config.lat * Math.PI / 180);
+            const dLatNm = dLatKm / 1.852;
+            const dLonNm = dLonKm / 1.852;
+            const scale = RADIUS / config.radius;
+            return { x: CENTER + dLonNm * scale, y: CENTER - dLatNm * scale };
+        }
+
+        // ============================================
+        // Rendering
+        // ============================================
+        function render() {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, RADIUS + 2, 0, Math.PI * 2);
+            ctx.clip();
+
+            // Background - map or black
+            const showMap = document.getElementById('showMap').checked;
+            if (showMap && mapLoaded && mapImage) {
+                // Draw map very faded
+                ctx.globalAlpha = 0.25;
+                ctx.drawImage(mapImage, 0, 0);
+                ctx.globalAlpha = 1.0;
+                // Dark green tint overlay for that radar scope feel
+                ctx.fillStyle = 'rgba(0, 20, 10, 0.5)';
+                ctx.fillRect(0, 0, SIZE, SIZE);
+            } else {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, SIZE, SIZE);
+            }
+
+            drawGrid();
+            drawAircraftOnRadar();
+            drawInfoBar();
+            ctx.restore();
+
+            // Circular border
+            ctx.strokeStyle = '#4a4a4a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, RADIUS, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        function drawGrid() {
+            // Range rings - brighter green for that classic radar look
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.35)';
+            ctx.lineWidth = 0.8;
+            for (let i = 1; i <= 4; i++) {
+                const r = (RADIUS * i) / 4;
+                ctx.beginPath();
+                ctx.arc(CENTER, CENTER, r, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            // Crosshairs
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(CENTER, CENTER - RADIUS);
+            ctx.lineTo(CENTER, CENTER + RADIUS);
+            ctx.moveTo(CENTER - RADIUS, CENTER);
+            ctx.lineTo(CENTER + RADIUS, CENTER);
+            ctx.stroke();
+
+            // Subtle radial sweep line (rotating effect)
+            const sweepAngle = (Date.now() / 50) % 360 * Math.PI / 180;
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(CENTER, CENTER);
+            ctx.lineTo(CENTER + RADIUS * Math.cos(sweepAngle), CENTER + RADIUS * Math.sin(sweepAngle));
+            ctx.stroke();
+
+            // Compass labels
+            ctx.fillStyle = 'rgba(100, 255, 150, 0.7)';
+            ctx.font = 'bold 10px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('N', CENTER, 4);
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('S', CENTER, SIZE - 4);
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText('W', 4, CENTER);
+            ctx.textAlign = 'right';
+            ctx.fillText('E', SIZE - 4, CENTER);
+
+            // Center marker - pulsing
+            const pulse = 3 + Math.sin(Date.now() / 500) * 1;
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, pulse, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(CENTER, CENTER, 8, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        function drawAircraftOnRadar() {
+            for (const a of aircraft) {
+                const pos = getAircraftScreenPos(a);
+                if (!pos) continue;
+
+                const color = getAltitudeColorCSS(a.altitude);
+                const isSelected = selectedAircraft && selectedAircraft.icao24 === a.icao24;
+
+                // Highlight ring if selected
+                if (isSelected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, 12, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                drawPlaneIcon(pos.x, pos.y, a.heading, color);
+
+                // Callsign label
+                ctx.fillStyle = '#00ffff';
+                ctx.font = '9px Courier New';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                const labelX = pos.x + 9;
+                const labelY = pos.y - 3;
+                ctx.fillText(a.callsign, labelX, labelY);
+
+                // Flight level
+                const fl = Math.round(a.altitude * 3.28084 / 100);
+                ctx.fillStyle = color;
+                ctx.font = '8px Courier New';
+                ctx.fillText(`FL${fl}`, labelX, labelY + 10);
+            }
+        }
+
+        function drawPlaneIcon(x, y, heading, color) {
+            const rad = heading * Math.PI / 180;
+            const size = 6;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(rad);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, -size * 1.5);
+            ctx.lineTo(-size * 0.7, size * 0.8);
+            ctx.lineTo(0, size * 0.4);
+            ctx.lineTo(size * 0.7, size * 0.8);
+            ctx.closePath();
+            ctx.fill();
+            // Glow effect
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 4;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        }
+
+        function drawInfoBar() {
+            ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.font = '10px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(`${aircraft.length} aircraft`, CENTER, SIZE - 6);
+            const config = getConfig();
+            ctx.textBaseline = 'top';
+            ctx.fillText(`${config.radius}NM`, CENTER, 14);
+        }
+
+        function getAltitudeColorCSS(altMeters) {
+            const altFt = altMeters * 3.28084;
+            if (altFt < 5000) return '#ff8800';
+            if (altFt < 15000) return '#ffff00';
+            if (altFt < 30000) return '#00ff00';
+            if (altFt < 40000) return '#00ffff';
+            return '#ff00ff';
+        }
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>
